@@ -11,9 +11,10 @@ my $pcap = shift @ARGV;
 my $listen_port = shift @ARGV;
 my $target_host = shift @ARGV;
 my $target_port = shift @ARGV;
+my $verbose = shift @ARGV || 0;
 
-die "Usage: $0 path-to-dest.pcap listen_port target_host target_port
-Eg. $0 /tmp/mysession 444 127.0.0.1 443
+die "Usage: $0 (path-to-dest.pcap|-) listen_port target_host target_port [verbose]
+Eg. $0 /tmp/mysession 444 127.0.0.1 443 1
 " if(!$target_port);
 $| = 1;
 Net::PcapWriter::IP->calculate_checksums(0);
@@ -30,8 +31,13 @@ my $target_ip = inet_ntoa(inet_aton($target_host));
 
 my $conn_counter = 0;
 
-my $writer = Net::PcapWriter->new($pcap);
-$writer->{fh}->autoflush(1);
+my $writer;
+if($pcap ne "-") {
+  $writer = Net::PcapWriter->new($pcap);
+  $writer->{fh}->autoflush(1);
+} else {
+  $verbose = 1;
+}
 
 my $lsn = IO::Socket::INET->new(Listen => 1, LocalPort => $listen_port, Reuse => 1);
 my $sel = IO::Select->new( $lsn );
@@ -65,9 +71,11 @@ while(my @ready = $sel->can_read) {
 			   
 			   #my $dest_file = sprintf("%s-%04d-%d-%s-%d-%s-%d.pcap", $dest_prefix, $conn_counter, $now, $accepted_address, $accepted_port, $target_host, $target_port);
 			   #mylog("Saving session to: $dest_file");
-			   my $conn = $writer->tcp_conn($accepted_address,$accepted_port,$target_ip,$target_port);
-			   $accepted_to_conn{$accepted} = $conn;
-			   $target_to_conn{$target} = $conn;
+			   if($writer) {
+				   my $conn = $writer->tcp_conn($accepted_address,$accepted_port,$target_ip,$target_port);
+				   $accepted_to_conn{$accepted} = $conn;
+				   $target_to_conn{$target} = $conn;
+			   }
 			   
 			} else {
 			   mylog("Unable to establish connection to target ($target_host:$target_port): $@");
@@ -116,7 +124,10 @@ sub relay {
 	   # we have got some data to be relayed.
 	   my $hd = hexdump($data);
 	   my $length = length($data);
-	   mylog("<< $incoming_str >> $target_str ($length bytes):\n$hd");
+	   my $inspection_str = "<< $incoming_str >> $target_str ($length bytes)";
+	   $inspection_str.= ":\n$hd" if($verbose);
+	   
+	   mylog($inspection_str);
 	   
 	   if($accepted_to_conn{$incoming}) {
   	     my $conn = $accepted_to_conn{$incoming};
@@ -126,9 +137,8 @@ sub relay {
   	     my $conn = $target_to_conn{$incoming};
 		 $conn->write(1, $data);
 	   }
-	   else {
-	     mylog("Bug. Cant find the pcap connection");
-	   }
+	   # else simple stderr based inspection is wanted
+
 
 	   $rc = $destination->send($data);
 	   if(!$rc) {
@@ -174,9 +184,9 @@ sub get_str {
 }
 
 sub mylog {
-  my $msg = shift;
-  my $now = localtime;
-  print STDERR "[$now] $msg\n";
+   my $msg = shift;
+   my $now = localtime;
+   print STDERR "[$now] $msg\n";
 }
 
 sub hexdump($)
