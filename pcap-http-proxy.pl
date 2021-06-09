@@ -37,7 +37,9 @@ if($pcap ne "-") {
   $writer->{fh}->autoflush(1);
 }
 
-my $lsn = IO::Socket::INET->new(Listen => 1, LocalPort => $listen_port, Reuse => 1);
+my $lsn = IO::Socket::INET->new(Listen => 1, LocalPort => $listen_port, Reuse => 1) or die "Cannot listen: $!";
+print "Listening on $listen_port\n";
+
 my $sel = IO::Select->new( $lsn );
 while(my @ready = $sel->can_read) {
 	for my $fh (@ready) {
@@ -112,33 +114,40 @@ while(my @ready = $sel->can_read) {
 			my ($target_host, $target_port) = get_ip_and_port($target_str);
 			my $target_ip = inet_ntoa(inet_aton($target_host));
 
-
-			delete $str_helper{$fh};
-			$sel->remove($fh);
-		    mylog("Trying to upgrade client to TLS..."); # we need to do this step first to learn the SNI!
-		    if(!IO::Socket::SSL->start_SSL($fh,
-				SSL_server => 1,
-				SSL_cert_file => $key_and_cert_pem_path,
-				SSL_key_file => $key_and_cert_pem_path,
-			)) {
-				 mylog("TLS upgrade of client $incoming_str failed: $SSL_ERROR");
-				 do_close($fh);
-				 next;
+			my $tls_server_name_sni = "";
+            if(!$ENV{NO_TLS}) {
+				delete $str_helper{$fh};
+				$sel->remove($fh);
+				mylog("Trying to upgrade client to TLS..."); # we need to do this step first to learn the SNI the client wants!
+				if(!IO::Socket::SSL->start_SSL($fh,
+					SSL_server => 1,
+					SSL_alpn_protocols => ['h2', 'http/2.0', 'spdy/3.1','http/1.1'],
+					SSL_cert_file => $key_and_cert_pem_path,
+					SSL_key_file => $key_and_cert_pem_path,
+				)) {
+					 mylog("TLS upgrade of client $incoming_str failed: $SSL_ERROR");
+					 do_close($fh);
+					 next;
+				}
+				$tls_server_name_sni = $fh->get_servername();
+				my $alpn = $fh->alpn_selected();
+				# this is needed as fh is silently replaced to something else
+				$str_helper{$fh} = $incoming_str;
+				$sel->add($fh);
+				mylog("TLS upgrade with the client has succeeded. SNI: $tls_server_name_sni ALPN: $alpn");
+				
+				mylog("Trying to upgrade the upstream to TLS...");
+				if(!IO::Socket::SSL->start_SSL($target, 
+					SSL_verify_mode => SSL_VERIFY_NONE, 
+					SSL_hostname => $tls_server_name_sni,
+					SSL_alpn_protocols => [$alpn],
+				)) {
+					mylog("TLS upgrade with the upstream $target_str failed: $SSL_ERROR");
+					do_close($fh);
+					next;
+				}
+				mylog("TLS upgrade with the upstream has succeeded.");
 			}
-			my $tls_server_name_sni = $fh->get_servername();
-			# this is needed as fh is silently replaced to something else
-			$str_helper{$fh} = $incoming_str;
-			$sel->add($fh);
-			mylog("TLS update with client succeeded. SNI is: $tls_server_name_sni");
-			
-			mylog("Trying to upgrade the upstream to TLS...");
-			if(!IO::Socket::SSL->start_SSL($target, SSL_verify_mode => SSL_VERIFY_NONE, SSL_hostname => $tls_server_name_sni)) {
-				mylog("TLS upgrade to upstream $target_str failed: $SSL_ERROR");
-				do_close($fh);
-				next;
-			}
-			mylog("TLS with the upstream has succeeded.");
-			
 						
 		    $sel->add($target);
 		    $accepted_to_target{$fh} = $target;
