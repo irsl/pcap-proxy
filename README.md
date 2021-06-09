@@ -8,4 +8,4 @@ If the application to be monitored does not respect the standard HTTPS_PROXY env
 
 https://github.com/irsl/tcp-http-proxy
 
-![H2/ALPN/TLS](https://github.com/irsl/pcap-proxy/raw/master/src/illustration.png "H2/ALPN/TLS")
+![H2/ALPN/TLS](https://raw.githubusercontent.com/irsl/pcap-proxy/master/illustration.png "H2/ALPN/TLS")
