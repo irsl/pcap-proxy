@@ -7,3 +7,5 @@ The http proxy expects a standard CONNECT somehost:port HTTP/1.0 kind of connect
 If the application to be monitored does not respect the standard HTTPS_PROXY environment variable, you can setup a transparent TCP proxy e.g. by using my another tool:
 
 https://github.com/irsl/tcp-http-proxy
+
+![H2/ALPN/TLS](https://github.com/irsl/pcap-proxy/raw/master/src/illustration.png "H2/ALPN/TLS")
