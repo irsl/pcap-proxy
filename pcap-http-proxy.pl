@@ -99,6 +99,7 @@ while(my @ready = $sel->can_read) {
 			   do_close($fh);				
 			   next;
 			}
+		    $target->autoflush(1);
 
 		    mylog("New connection to target $target_str established.");
 			if(!syswrite($fh, "HTTP/1.0 200 OK\r\n\r\n")) {
@@ -111,16 +112,10 @@ while(my @ready = $sel->can_read) {
 			my ($target_host, $target_port) = get_ip_and_port($target_str);
 			my $target_ip = inet_ntoa(inet_aton($target_host));
 
-			mylog("Trying to upgrade the upstream to TLS...");
-			if(!IO::Socket::SSL->start_SSL($target, SSL_verify_mode => SSL_VERIFY_NONE, SSL_hostname => $target_host)) {
-				mylog("TLS upgrade to upstream $target_str failed: $SSL_ERROR");
-				do_close($fh);
-				next;
-			}
 
 			delete $str_helper{$fh};
 			$sel->remove($fh);
-		    mylog("TLS with target $target_str established. Trying to upgrade client to TLS...");
+		    mylog("Trying to upgrade client to TLS..."); # we need to do this step first to learn the SNI!
 		    if(!IO::Socket::SSL->start_SSL($fh,
 				SSL_server => 1,
 				SSL_cert_file => $key_and_cert_pem_path,
@@ -130,21 +125,27 @@ while(my @ready = $sel->can_read) {
 				 do_close($fh);
 				 next;
 			}
-			
+			my $tls_server_name_sni = $fh->get_servername();
 			# this is needed as fh is silently replaced to something else
 			$str_helper{$fh} = $incoming_str;
 			$sel->add($fh);
-			$fh->autoflush(1);
+			mylog("TLS update with client succeeded. SNI is: $tls_server_name_sni");
 			
-			mylog("TLS rewrapping succeeded with both parties.");
+			mylog("Trying to upgrade the upstream to TLS...");
+			if(!IO::Socket::SSL->start_SSL($target, SSL_verify_mode => SSL_VERIFY_NONE, SSL_hostname => $tls_server_name_sni)) {
+				mylog("TLS upgrade to upstream $target_str failed: $SSL_ERROR");
+				do_close($fh);
+				next;
+			}
+			mylog("TLS with the upstream has succeeded.");
 			
+						
 		    $sel->add($target);
-		    $target->autoflush(1);
 		    $accepted_to_target{$fh} = $target;
 		    $target_to_accepted{$target} = $fh;
 		    $str_helper{$target} = $target_str;
 			
-			my $session_name = sprintf("%03d--%s--%s.bin",$conn_counter, $incoming_str, $target_str);
+			my $session_name = sprintf("%03d--%s--%s--%s.bin",$conn_counter, $tls_server_name_sni, $incoming_str, $target_str);
 			$session_name =~ s/:/-/g;
 			$session_names{$fh} = $session_name;
 			$session_names{$target} = $session_name;
