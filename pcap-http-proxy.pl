@@ -138,12 +138,15 @@ while(my @ready = $sel->can_read) {
 				$sel->add($fh);
 				mylog("TLS upgrade with the client has succeeded. SNI: $tls_server_name_sni ALPN: $alpn");
 				
+                my %upstream_opts = (
+                    SSL_verify_mode => SSL_VERIFY_NONE,
+                    SSL_hostname => $tls_server_name_sni,
+                );
+                if($alpn) { # some connections may fail otherwise
+                    $upstream_opts{SSL_alpn_protocols} = [$alpn];
+                }
 				mylog("Trying to upgrade the upstream to TLS...");
-				if(!IO::Socket::SSL->start_SSL($target, 
-					SSL_verify_mode => SSL_VERIFY_NONE, 
-					SSL_hostname => $tls_server_name_sni,
-					SSL_alpn_protocols => [$alpn],
-				)) {
+				if(!IO::Socket::SSL->start_SSL($target, %upstream_opts)) {
 					mylog("TLS upgrade with the upstream $target_str failed: $SSL_ERROR");
 					do_close($fh);
 					next;
