@@ -77,10 +77,12 @@ while(my @ready = $sel->can_read) {
 	        my $rc = sysread($fh, my $data, 1024);
  		    if(!defined($rc)) {
 			  mylog("$incoming_str: Socket error ($!)");
+			  do_close($fh);
 			  next;
 		    }
 		    if(!length($data)) {
 			  mylog("$incoming_str: Socket EOF");
+			  do_close($fh);
 			  next;
 		    }
 			
